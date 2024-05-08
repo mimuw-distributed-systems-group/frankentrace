@@ -9,7 +9,7 @@ Out of the box, DWT/ITM allows:
 - ITM may output: 16LSB of the address, data with direction, PC and a timestamp.
 
 In this case, we start the trace very early by registering a hook in the Reset interrupt handler.
-For more information about tracing see `mm319369/.../TPIU.md` and [ARM-ARM] C1.8.1 The DWT comparators.
+For more information about tracing see `TPIU.md` and [ARM-ARM] C1.8.1 The DWT comparators.
 
 The main limiting factor is TPIU throughput: it may be set up as UART (8/10) with baudrate = CPU_CLK.
 A PC packet takes 5 bytes, timestamp 1-5 bytes.
@@ -107,12 +107,12 @@ But the TPIU breaks before going to sleep (executing `wfi`). Therefore, in the l
 
 # Parsing the trace
 
-Read `mm319369/test_debug/TPIU.md` how the tracing interface works. Save a capture in `sigrok` and run something alike to:
+Read `TPIU.md` how the tracing interface works. Save a capture in `sigrok` and run something alike to:
 
 ```shell
 sigrok-cli -i data_trace_concat.srzip -P uart:rx=D0:baudrate=8000000,arm_itm3 -B arm_itm3=pkg_csv |  pd  -o lsu_trace_concat.pkl
 
-python $CMEMU/mm319369/test_debug/parse_lsu_trace.py lsu_trace_concat.pkl 
+python host/parse_lsu_trace.py lsu_trace_concat.pkl 
 ```
 
 Some files will be placed beside the input. `lsu_trace_wide.pkl` has aggregated data from phases for each of the traced pairs.
