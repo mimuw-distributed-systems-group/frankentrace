@@ -1,0 +1,2 @@
+Note: some files (itm.c) are copied from other places (and should stay mostly in sync).
+We should do symlinks here, but those won't work with docker-based app compilation.

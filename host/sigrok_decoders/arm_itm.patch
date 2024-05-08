@@ -1,0 +1,183 @@
+diff -u arm_itm3/pd.py arm_itm/pd.py
+--- arm_itm3/pd.py	2022-09-10 03:45:23.380337796 +0200
++++ arm_itm/pd.py	2022-09-09 14:59:15.572022080 +0200
+@@ -38,8 +38,8 @@
+ 
+ class Decoder(srd.Decoder):
+     api_version = 3
+-    id = 'arm_itm3'
+-    name = 'ARM ITM3'
++    id = 'arm_itm'
++    name = 'ARM ITM'
+     longname = 'ARM Instrumentation Trace Macroblock'
+     desc = 'ARM Cortex-M / ARMv7m ITM trace protocol.'
+     license = 'gplv2+'
+@@ -80,10 +80,6 @@
+         ('functions', 'Current functions', (11,)),
+     )
+ 
+-    binary = (
+-        ('pkg_csv', 'CSV with ITM packages'),
+-    )
+-
+     def __init__(self):
+         self.reset()
+ 
+@@ -97,11 +93,8 @@
+         self.file_lookup = {}
+         self.func_lookup = {}
+ 
+-
+     def start(self):
+         self.out_ann = self.register(srd.OUTPUT_ANN)
+-        self.out_binary = self.register(srd.OUTPUT_BINARY)
+-        self.put(0, 0, self.out_binary, [0, "start_sa,end_sa,dwt_ts_shifted,ptype,kind,val\n".encode()])
+         self.load_objdump()
+ 
+     def load_objdump(self):
+@@ -142,11 +135,6 @@
+                     if m:
+                         prev_file = m.group(1)
+ 
+-    def put_csv(self, ss, es, ptype):
+-        payload = ','.join(map(str, self.csv_payload))
+-        row = f'{ss},{es},{self.dwt_timestamp},{ptype},{payload}\n'
+-        self.put(ss, es, self.out_binary, [0, row.encode()])
+-
+     def get_packet_type(self, byte):
+         '''Identify packet type based on its first byte.
+            See ARMv7-M_ARM.pdf section "Debug ITM and DWT" "Packet Types"
+@@ -198,11 +186,9 @@
+ 
+     def fallback(self, buf):
+         ptype = self.get_packet_type(buf[0])
+-        self.csv_payload = ('unhandled', ptype)
+         return [0, [('Unhandled %s: ' % ptype) + ' '.join(['%02x' % b for b in buf])]]
+ 
+     def handle_overflow(self, buf):
+-        self.csv_payload = ('overflow', '')
+         return [0, ['Overflow']]
+ 
+     def handle_hardware(self, buf):
+@@ -214,26 +200,18 @@
+ 
+         if pid == 0:
+             text = 'DWT events:'
+-            payld = ''
+             if buf[1] & 0x20:
+                 text += ' Cyc'
+-                payld += 'C'
+             if buf[1] & 0x10:
+                 text += ' Fold'
+-                payld += 'F'
+             if buf[1] & 0x08:
+                 text += ' LSU'
+-                payld += 'L'
+             if buf[1] & 0x04:
+                 text += ' Sleep'
+-                payld += 'S'
+             if buf[1] & 0x02:
+                 text += ' Exc'
+-                payld += 'E'
+             if buf[1] & 0x01:
+                 text += ' CPI'
+-                payld += 'P'
+-            self.csv_payload = ('DWT events', payld)
+             return [3, [text]]
+         elif pid == 1:
+             excnum = ((buf[2] & 1) << 8) | buf[1]
+@@ -241,20 +219,16 @@
+             excstr = ARM_EXCEPTIONS.get(excnum, 'IRQ %d' % (excnum - 16))
+             if event == 1:
+                 self.mode_change(excstr)
+-                self.csv_payload = ('enter', excstr)
+                 return [5, ['Enter: ' + excstr, 'E ' + excstr]]
+             elif event == 2:
+                 self.mode_change(None)
+-                self.csv_payload = ('exit', excstr)
+                 return [5, ['Exit: ' + excstr, 'X ' + excstr]]
+             elif event == 3:
+                 self.mode_change(excstr)
+-                self.csv_payload = ('resume', excstr)
+                 return [5, ['Resume: ' + excstr, 'R ' + excstr]]
+         elif pid == 2:
+             pc = buf[1] | (buf[2] << 8) | (buf[3] << 16) | (buf[4] << 24)
+             self.location_change(pc)
+-            self.csv_payload = ('pc', '0x%08x' % pc)
+             return [6, ['PC: 0x%08x' % pc]]
+         elif (buf[0] & 0xC4) == 0x84:
+             comp = (buf[0] & 0x30) >> 4
+@@ -265,20 +239,17 @@
+                 data = '0x%04x' % (buf[1] | (buf[2] << 8))
+             else:
+                 data = '0x%08x' % (buf[1] | (buf[2] << 8) | (buf[3] << 16) | (buf[4] << 24))
+-            self.csv_payload = (what, data)
+             return [4, ['Watchpoint %d: %s data %s' % (comp, what, data),
+                         'WP%d: %s %s' % (comp, what[0], data)]]
+         elif (buf[0] & 0xCF) == 0x47:
+             comp = (buf[0] & 0x30) >> 4
+             addr = buf[1] | (buf[2] << 8) | (buf[3] << 16) | (buf[4] << 24)
+-            self.csv_payload = (comp, addr)
+             self.location_change(addr)
+             return [4, ['Watchpoint %d: PC 0x%08x' % (comp, addr),
+                         'WP%d: PC 0x%08x' % (comp, addr)]]
+         elif (buf[0] & 0xCF) == 0x4E:
+             comp = (buf[0] & 0x30) >> 4
+             offset = buf[1] | (buf[2] << 8)
+-            self.csv_payload = (comp, offset)
+             return [4, ['Watchpoint %d: address 0x????%04x' % (comp, offset),
+                         'WP%d: A 0x%04x' % (comp, offset)]]
+ 
+@@ -298,14 +269,11 @@
+         self.push_delayed_sw()
+ 
+         if plen == 1:
+-            data = '0x%02x' %  buf[1]
++            return [2, ['%d: 0x%02x' % (pid, buf[1])]]
+         elif plen == 2:
+-            data = '0x%02x%02x' % (buf[2], buf[1])
++            return [2, ['%d: 0x%02x%02x' % (pid, buf[2], buf[1])]]
+         elif plen == 4:
+-            data = '0x%02x%02x%02x%02x' % (buf[4], buf[3], buf[2], buf[1])
+-
+-        self.csv_payload = (pid, data)
+-        return [2, ['%d: %s' % (pid, data)]]
++            return [2, ['%d: 0x%02x%02x%02x%02x' % (pid, buf[4], buf[3], buf[2], buf[1])]]
+ 
+     def handle_timestamp(self, buf):
+         '''Handle timestamp packets, which indicate the time of some DWT event packet.'''
+@@ -325,23 +293,18 @@
+             if len(buf) > 4:
+                 ts |= (buf[4] & 0x7F) << 21
+ 
+-        # Counter is zeroed after packet generation -> that means next cycle
+-        # would read 0
+-        ts += 1
+         self.dwt_timestamp += ts
+ 
+         if tc == 0:
+-            msg = 'exact'
++            msg = '(exact)'
+         elif tc == 1:
+-            msg = 'timestamp delayed'
++            msg = '(timestamp delayed)'
+         elif tc == 2:
+-            msg = 'event delayed'
++            msg = '(event delayed)'
+         elif tc == 3:
+-            msg = 'event and timestamp delayed'
++            msg = '(event and timestamp delayed)'
+ 
+-        self.csv_payload = (msg, ts)
+-        #return [1, ['Timestamp: %d %s' % (self.dwt_timestamp, msg)]]
+-        return [1, ['Timestamp: Δ%d (%s)' % (ts, msg), 'T: Δ%d (%s)' % (ts, msg)]]
++        return [1, ['Timestamp: %d %s' % (self.dwt_timestamp, msg)]]
+ 
+     def add_delayed_sw(self, pid, c):
+         '''We join printable characters from software source so that printed
+@@ -407,5 +370,4 @@
+         if data is not None:
+             if data:
+                 self.put(self.startsample, es, self.out_ann, data)
+-                self.put_csv(self.startsample, es, ptype)
+             self.buf = []
